@@ -93,7 +93,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-4 xl:p-8 max-w-6xl mx-auto">
+  <div class="p-4 lg:p-8 max-w-6xl mx-auto">
     <!-- Page header -->
     <div class="flex items-center justify-between mb-8">
       <div>
@@ -123,7 +123,7 @@ onMounted(async () => {
     </div>
 
     <!-- Stats cards -->
-    <div class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       <!-- Status -->
       <div class="card p-5">
         <div class="flex items-center gap-3 mb-3">
@@ -246,7 +246,7 @@ onMounted(async () => {
     </div>
 
     <!-- Main content: Controls + Preview -->
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <!-- Capture Controls -->
       <div class="card p-6 col-span-1">
         <h3 class="text-base font-semibold text-slate-800 mb-5">截图控制</h3>

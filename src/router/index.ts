@@ -13,6 +13,11 @@ const router = createRouter({
       name: 'history',
       component: () => import('../views/History.vue'),
     },
+    {
+      path: '/search',
+      name: 'search',
+      component: () => import('../views/Search.vue'),
+    },
   ],
 });
 

@@ -19,3 +19,10 @@ chrono = { version = "0.4", features = ["serde"] }
 
 tokio = { version = "1", features = ["full"] }
 base64 = "0.22"
+rusqlite = { version = "0.32", features = ["bundled"] }
+windows = { version = "0.61", features = [
+    "Media_Ocr",
+    "Graphics_Imaging",
+    "Storage_Streams",
+    "Foundation",
+] }

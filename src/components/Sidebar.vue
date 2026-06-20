@@ -8,6 +8,7 @@ const route = useRoute();
 const navItems = [
   { path: '/', label: '控制台', icon: 'dashboard' },
   { path: '/history', label: '历史记录', icon: 'history' },
+  { path: '/search', label: '文字搜索', icon: 'search' },
 ];
 </script>
 
@@ -91,6 +92,21 @@ const navItems = [
             stroke-linejoin="round"
             stroke-width="2"
             d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        <!-- Search icon -->
+        <svg
+          v-if="item.icon === 'search'"
+          class="w-5 h-5 flex-shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
           />
         </svg>
         {{ item.label }}

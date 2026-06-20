@@ -9,6 +9,7 @@ const loadingDates = ref(true);
 const loadingImages = ref(false);
 const lightboxImage = ref<string | null>(null);
 const lightboxPath = ref<string>('');
+const lightboxOcrText = ref<string>('');
 const imageCache = reactive<Record<string, string>>({});
 const loadingSet = new Set<string>();
 
@@ -96,12 +97,21 @@ async function loadScreenshots() {
 
 async function openLightbox(filepath: string) {
   lightboxPath.value = filepath;
-  lightboxImage.value = await getImageUrl(filepath);
+  lightboxImage.value = null;
+  lightboxOcrText.value = '';
+  // Fetch image and OCR text in parallel
+  const [imageUrl, ocrText] = await Promise.all([
+    getImageUrl(filepath),
+    invoke<string | null>('get_ocr_text', { filepath }).catch(() => null),
+  ]);
+  lightboxImage.value = imageUrl;
+  lightboxOcrText.value = ocrText || '';
 }
 
 function closeLightbox() {
   lightboxImage.value = null;
   lightboxPath.value = '';
+  lightboxOcrText.value = '';
 }
 
 async function deleteImage(filepath: string) {
@@ -120,10 +130,12 @@ async function deleteImage(filepath: string) {
 
 function formatDate(dateStr: string): string {
   try {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    // Parse as local time to avoid timezone offset skew
+    const d = new Date(dateStr + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffMs = today.getTime() - d.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
     if (diffDays === 0) return '今天';
     if (diffDays === 1) return '昨天';
@@ -178,7 +190,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-4 xl:p-8 max-w-7xl mx-auto min-w-0">
+  <div class="p-4 lg:p-8 max-w-7xl mx-auto min-w-0">
     <!-- Page header -->
     <div class="flex items-center justify-between mb-8">
       <div>
@@ -228,9 +240,9 @@ onMounted(() => {
     </div>
 
     <!-- Content -->
-    <div v-else class="flex flex-col xl:flex-row gap-4 xl:gap-6">
+    <div v-else class="flex flex-col lg:flex-row gap-4 lg:gap-6">
       <!-- Date sidebar -->
-      <div class="w-full xl:w-56 flex-shrink-0">
+      <div class="w-full lg:w-56 flex-shrink-0">
         <div class="card p-4">
           <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 px-1">
             日期列表
@@ -244,12 +256,12 @@ onMounted(() => {
             ></div>
           </div>
 
-          <div v-else class="flex xl:block gap-2 xl:gap-0 xl:space-y-1 xl:max-h-[560px] overflow-x-auto xl:overflow-x-hidden overflow-y-hidden xl:overflow-y-auto pr-1">
+          <div v-else class="flex lg:block gap-2 lg:gap-0 lg:space-y-1 lg:max-h-[560px] overflow-x-auto lg:overflow-x-hidden overflow-y-hidden lg:overflow-y-auto pr-1">
             <button
               v-for="date in dates"
               :key="date"
               @click="selectedDate = date"
-              class="xl:w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all duration-150 flex-shrink-0"
+              class="lg:w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all duration-150 flex-shrink-0"
               :class="
                 selectedDate === date
                   ? 'bg-indigo-50 text-indigo-700 font-medium'
@@ -280,7 +292,7 @@ onMounted(() => {
           </div>
 
           <!-- Loading -->
-          <div v-if="loadingImages" class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div v-if="loadingImages" class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div
               v-for="i in 8"
               :key="i"
@@ -310,7 +322,7 @@ onMounted(() => {
           </div>
 
           <!-- Grid -->
-          <div v-else class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div v-else class="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div
               v-for="filepath in screenshots"
               :key="filepath"
@@ -428,12 +440,28 @@ onMounted(() => {
           </svg>
         </button>
 
-        <!-- Image -->
-        <img
-          :src="lightboxImage"
-          alt="预览"
-          class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
-        />
+        <!-- Content: image + OCR text side by side on large screens -->
+        <div class="flex flex-col lg:flex-row items-center gap-4 max-w-[95vw] max-h-[90vh]">
+          <!-- Image -->
+          <img
+            :src="lightboxImage"
+            alt="预览"
+            class="max-w-full lg:max-w-[70vw] max-h-[70vh] object-contain rounded-lg shadow-2xl"
+          />
+
+          <!-- OCR text panel -->
+          <div
+            v-if="lightboxOcrText"
+            class="w-full lg:w-72 max-h-[70vh] overflow-y-auto bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-white/10"
+          >
+            <h4 class="text-white/70 text-xs font-semibold uppercase tracking-wider mb-3">
+              识别文字
+            </h4>
+            <p class="text-white/90 text-sm leading-relaxed whitespace-pre-wrap">
+              {{ lightboxOcrText }}
+            </p>
+          </div>
+        </div>
 
         <!-- Bottom info bar -->
         <div class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-4 px-5 py-2.5 bg-white/10 backdrop-blur-sm rounded-lg text-white text-sm">

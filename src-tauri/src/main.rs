@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod db;
+mod ocr;
 mod screenshot;
 
 use chrono::Local;
@@ -44,20 +46,54 @@ struct CaptureResult {
     base64: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+struct SearchResult {
+    filepath: String,
+    ocr_text: String,
+    captured_at: String,
+}
+
 // ── App State ─────────────────────────────────────────────────
 
 struct AppState {
     capture_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
     capture_running: std::sync::Arc<AtomicBool>,
+    db: std::sync::Arc<db::Database>,
 }
 
 impl AppState {
     fn new() -> Self {
+        let db_path = app_dir().join("ocr.db");
+        let database = db::Database::new(&db_path).expect("无法初始化数据库");
         Self {
             capture_handle: Mutex::new(None),
             capture_running: std::sync::Arc::new(AtomicBool::new(false)),
+            db: std::sync::Arc::new(database),
         }
     }
+}
+
+/// Spawn a fire-and-forget OCR task for a newly captured screenshot.
+fn spawn_ocr_task(db: std::sync::Arc<db::Database>, filepath: String) {
+    tokio::spawn(async move {
+        let fp = filepath.clone();
+        let text = tokio::task::spawn_blocking(move || ocr::recognize_text_blocking(&fp)).await;
+        match text {
+            Ok(Ok(t)) => {
+                let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let _ = db.insert_or_update_ocr(&filepath, &t, &ts);
+            }
+            Ok(Err(e)) => {
+                eprintln!("OCR 识别失败 [{}]: {}", filepath, e);
+                // Store empty text so we don't retry this file
+                let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                let _ = db.insert_or_update_ocr(&filepath, "", &ts);
+            }
+            Err(e) => {
+                eprintln!("OCR 任务异常 [{}]: {}", filepath, e);
+            }
+        }
+    });
 }
 
 // ── Paths ─────────────────────────────────────────────────────
@@ -110,8 +146,15 @@ fn do_capture(format: &str, quality: u8) -> Result<CaptureResult, String> {
 // ── Tauri Commands ────────────────────────────────────────────
 
 #[tauri::command]
-async fn take_screenshot(format: String, quality: u8) -> Result<CaptureResult, String> {
-    do_capture(&format, quality)
+async fn take_screenshot(
+    format: String,
+    quality: u8,
+    state: tauri::State<'_, AppState>,
+) -> Result<CaptureResult, String> {
+    let result = do_capture(&format, quality)?;
+    // Spawn background OCR task
+    spawn_ocr_task(state.db.clone(), result.filepath.clone());
+    Ok(result)
 }
 
 #[tauri::command]
@@ -142,10 +185,13 @@ async fn start_capture(
     let q = quality;
     let app_handle = app.clone();
 
+    let db_clone = state.db.clone();
     let handle = tokio::spawn(async move {
         while r.load(Ordering::SeqCst) {
             match do_capture(&fmt, q) {
                 Ok(result) => {
+                    // Spawn background OCR task
+                    spawn_ocr_task(db_clone.clone(), result.filepath.clone());
                     let _ = app_handle.emit("screenshot-taken", ScreenshotPayload {
                         filepath: result.filepath,
                         base64: result.base64,
@@ -246,8 +292,57 @@ async fn get_dates_with_screenshots() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn delete_screenshot(filepath: String) -> Result<(), String> {
-    fs::remove_file(&filepath).map_err(|e| format!("删除文件失败: {}", e))
+async fn delete_screenshot(
+    filepath: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    fs::remove_file(&filepath).map_err(|e| format!("删除文件失败: {}", e))?;
+    state.db.delete_ocr_for_file(&filepath).ok();
+    Ok(())
+}
+
+#[tauri::command]
+async fn search_screenshots(
+    keyword: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SearchResult>, String> {
+    if keyword.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let rows = state.db.search(keyword.trim())?;
+    Ok(rows
+        .into_iter()
+        .map(|(fp, text, ts)| SearchResult {
+            filepath: fp,
+            ocr_text: text,
+            captured_at: ts,
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn run_ocr(
+    filepath: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let fp = filepath.clone();
+    let text = tokio::task::spawn_blocking(move || ocr::recognize_text_blocking(&fp))
+        .await
+        .map_err(|e| format!("OCR 任务异常: {}", e))??;
+    let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    state
+        .db
+        .insert_or_update_ocr(&filepath, &text, &ts)
+        .ok();
+    Ok(text)
+}
+
+#[tauri::command]
+async fn get_ocr_text(
+    filepath: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    state.db.get_ocr_for_file(&filepath)
 }
 
 #[tauri::command]
@@ -331,6 +426,9 @@ fn main() {
             get_screenshots_by_date,
             get_dates_with_screenshots,
             delete_screenshot,
+            search_screenshots,
+            run_ocr,
+            get_ocr_text,
             get_settings,
             save_settings,
             get_storage_info,

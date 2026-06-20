@@ -140,7 +140,11 @@ onUnmounted(() => {
     <div class="flex flex-1 overflow-hidden">
       <Sidebar />
       <main class="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive>
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </main>
     </div>
   </div>
