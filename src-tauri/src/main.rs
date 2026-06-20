@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use base64::Engine;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 // ── Settings ──────────────────────────────────────────────────
 
@@ -417,6 +417,58 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(state)
+        .setup(|app| {
+            use tauri::menu::{MenuBuilder, MenuItemBuilder};
+            use tauri::tray::TrayIconBuilder;
+
+            let quit_item = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+            let menu = MenuBuilder::new(app).item(&quit_item).build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().unwrap())
+                .tooltip("Screen Snap - 屏幕快照记录工具")
+                .menu(&menu)
+                .show_menu_on_left_click(false) // 左键不弹出菜单
+                .on_menu_event(|_app, event| {
+                    if event.id().0 == "quit" {
+                        // Close window first, then exit cleanly
+                        if let Some(window) = _app.get_webview_window("main") {
+                            let _ = window.destroy();
+                        }
+                        _app.exit(0);
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Left-click on release only (fires once, not on both Down + Up)
+                    if let tauri::tray::TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false)
+                                && window.is_focused().unwrap_or(false)
+                            {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Hide to tray instead of closing
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             take_screenshot,
             read_screenshot_data,
