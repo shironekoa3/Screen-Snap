@@ -737,6 +737,19 @@ fn main() {
     };
 
     tauri::Builder::default()
+        // 必须第一个注册：第二个实例启动时会在这里被拦下，
+        // 然后把已有窗口唤到前台，避免两份定时任务同时写 screenshots/。
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // 开机启动项重复触发时不打扰用户（第一个实例可能正安静待在托盘里）
+            if argv.iter().any(|a| a == AUTOSTART_ARG) {
+                return;
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(state)
         .setup(move |app| {
             use tauri::menu::{MenuBuilder, MenuItemBuilder};
