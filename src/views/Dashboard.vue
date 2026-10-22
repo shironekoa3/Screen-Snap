@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 import { useCaptureStore } from '../stores/capture';
 import { useSettingsStore } from '../stores/settings';
 
@@ -64,6 +65,17 @@ async function handleManualCapture() {
   }
 }
 
+/** 双击预览图：用系统默认程序打开原图 */
+async function openInSystem() {
+  const filepath = captureStore.lastScreenshot;
+  if (!filepath) return;
+  try {
+    await invoke('open_screenshot', { filepath });
+  } catch (e: any) {
+    showToastMsg(e?.toString() || '打开图片失败');
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -87,6 +99,16 @@ const intervalPresets = [
   { label: '1 小时', value: 3600 },
 ];
 
+// 截图参数改动即保存（防抖），不必等到点「开始定时截图」
+watch(
+  () => [
+    settingsStore.intervalSecs,
+    settingsStore.format,
+    settingsStore.quality,
+  ],
+  () => settingsStore.saveDebounced()
+);
+
 onMounted(async () => {
   await captureStore.loadStorageInfo();
 });
@@ -95,7 +117,7 @@ onMounted(async () => {
 <template>
   <div class="p-4 lg:p-8 max-w-6xl mx-auto">
     <!-- Page header -->
-    <div class="flex items-center justify-between mb-8">
+    <div class="flex items-center justify-between mb-5">
       <div>
         <h2 class="text-2xl font-bold text-slate-800">控制台</h2>
         <p class="text-slate-500 text-sm mt-0.5">管理屏幕截图录制与查看状态</p>
@@ -123,7 +145,7 @@ onMounted(async () => {
     </div>
 
     <!-- Stats cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
       <!-- Status -->
       <div class="card p-5">
         <div class="flex items-center gap-3 mb-3">
@@ -157,9 +179,9 @@ onMounted(async () => {
       <!-- Today captures -->
       <div class="card p-5">
         <div class="flex items-center gap-3 mb-3">
-          <div class="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center">
+          <div class="w-9 h-9 rounded-lg bg-primary-50 flex items-center justify-center">
             <svg
-              class="w-5 h-5 text-indigo-500"
+              class="w-5 h-5 text-primary-500"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -239,20 +261,23 @@ onMounted(async () => {
         <p class="text-2xl font-bold text-slate-800">
           {{ formatBytes(captureStore.totalSizeBytes) }}
         </p>
-        <p class="text-xs text-slate-400 mt-1">
-          截图存储于 AppData 目录
+        <p
+          class="text-xs text-slate-400 mt-1 truncate"
+          :title="captureStore.dataDir"
+        >
+          {{ captureStore.dataDir || '截图存储于程序目录' }}
         </p>
       </div>
     </div>
 
     <!-- Main content: Controls + Preview -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Capture Controls -->
       <div class="card p-6 col-span-1">
-        <h3 class="text-base font-semibold text-slate-800 mb-5">截图控制</h3>
+        <h3 class="text-base font-semibold text-slate-800 mb-4">截图控制</h3>
 
         <!-- Start / Stop -->
-        <div class="mb-6">
+        <div class="mb-4">
           <button
             v-if="!captureStore.isRunning"
             class="btn-primary w-full py-3 text-base"
@@ -301,7 +326,7 @@ onMounted(async () => {
 
         <!-- Manual capture -->
         <button
-          class="btn-ghost w-full mb-6 border border-slate-200 hover:border-slate-300 py-2.5"
+          class="btn-ghost w-full mb-4 border border-slate-200 hover:border-slate-300 py-2.5"
           :disabled="isCapturing"
           @click="handleManualCapture"
         >
@@ -323,7 +348,7 @@ onMounted(async () => {
         </button>
 
         <!-- Separator -->
-        <div class="border-t border-slate-100 my-5"></div>
+        <div class="border-t border-slate-100 my-4"></div>
 
         <!-- Interval -->
         <div class="mb-4">
@@ -360,7 +385,7 @@ onMounted(async () => {
               class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border cursor-pointer transition-all duration-150"
               :class="
                 settingsStore.format === 'png'
-                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                  ? 'border-primary-500 bg-primary-50 text-primary-700'
                   : 'border-slate-200 text-slate-600 hover:border-slate-300'
               "
             >
@@ -378,7 +403,7 @@ onMounted(async () => {
               class="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border cursor-pointer transition-all duration-150"
               :class="
                 settingsStore.format === 'jpg'
-                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                  ? 'border-primary-500 bg-primary-50 text-primary-700'
                   : 'border-slate-200 text-slate-600 hover:border-slate-300'
               "
             >
@@ -398,7 +423,7 @@ onMounted(async () => {
         <!-- Quality (JPG only) -->
         <div v-if="settingsStore.format === 'jpg'" class="mb-2">
           <label class="block text-xs font-medium text-slate-500 mb-2">
-            压缩质量: <span class="text-indigo-600 font-semibold">{{ settingsStore.quality }}%</span>
+            压缩质量: <span class="text-primary-600 font-semibold">{{ settingsStore.quality }}%</span>
           </label>
           <input
             type="range"
@@ -412,7 +437,7 @@ onMounted(async () => {
                 ($event.target as HTMLInputElement).value
               )
             "
-            class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+            class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-primary-500"
           />
           <div class="flex justify-between text-xs text-slate-400 mt-1">
             <span>小文件</span>
@@ -433,7 +458,9 @@ onMounted(async () => {
             :src="lastPreviewUrl"
             :key="lastPreviewUrl"
             alt="最新截图"
-            class="w-full h-auto max-h-[440px] object-contain"
+            title="双击用系统默认程序打开"
+            class="w-full h-auto max-h-[440px] object-contain cursor-pointer select-none"
+            @dblclick="openInSystem"
           />
         </div>
 

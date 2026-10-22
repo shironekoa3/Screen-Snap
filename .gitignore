@@ -24,3 +24,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# 运行时数据（便携模式：数据与 exe 同目录）
+src-tauri/screenshots/
+src-tauri/ocr.db
+src-tauri/settings.json
+startup-error.log

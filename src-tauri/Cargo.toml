@@ -10,7 +10,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 screenshots = "0.8"
@@ -19,6 +18,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 tokio = { version = "1", features = ["full"] }
 base64 = "0.22"
+winreg = "0.55"
 rusqlite = { version = "0.32", features = ["bundled"] }
 windows = { version = "0.61", features = [
     "Media_Ocr",
@@ -26,3 +26,17 @@ windows = { version = "0.61", features = [
     "Storage_Streams",
     "Foundation",
 ] }
+
+# dev 构建下也把依赖优化一遍。image / screenshots 这类纯计算 crate 在未优化时
+# 慢几十倍（实测缩略图 771ms→22ms、PNG 编码 1240ms→13ms），
+# 而应用自身的代码仍保持 opt-level=0，方便调试。
+# 依赖不生成调试信息：否则 opt-level=3 + 完整 debuginfo 编译极易内存吃紧。
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+
+# 本包也要开一点优化：image 的 resize 等函数是泛型的，会实例化到调用方 crate，
+# 只优化依赖时它们仍然是 opt-level=0（实测 935ms vs 22ms）。
+# 1 级足够，且不影响断点调试。
+[profile.dev]
+opt-level = 1

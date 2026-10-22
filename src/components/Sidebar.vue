@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useCaptureStore } from '../stores/capture';
 import { useRoute } from 'vue-router';
+import appIcon from '../assets/app-icon.png';
 
 const captureStore = useCaptureStore();
 const route = useRoute();
@@ -8,7 +9,6 @@ const route = useRoute();
 const navItems = [
   { path: '/', label: '控制台', icon: 'dashboard' },
   { path: '/history', label: '历史记录', icon: 'history' },
-  { path: '/search', label: '文字搜索', icon: 'search' },
 ];
 </script>
 
@@ -19,29 +19,12 @@ const navItems = [
     <!-- Logo / Brand -->
     <div class="px-5 pt-4 pb-5">
       <div class="flex items-center gap-3">
-        <div
-          class="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/25"
-        >
-          <svg
-            class="w-5 h-5 text-white"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-            />
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-          </svg>
-        </div>
+        <img
+          :src="appIcon"
+          alt="Screen Snap"
+          class="w-9 h-9 rounded-lg shadow-lg shadow-primary-500/25 select-none"
+          draggable="false"
+        />
         <div>
           <h1 class="text-white font-semibold text-sm leading-tight">
             Screen Snap
@@ -52,18 +35,19 @@ const navItems = [
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 px-3 py-2 space-y-1 border-t border-slate-700/60">
-      <router-link
-        v-for="item in navItems"
-        :key="item.path"
-        :to="item.path"
-        class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150"
-        :class="
-          route.path === item.path
-            ? 'bg-indigo-500/15 text-indigo-400'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-        "
-      >
+    <nav class="flex-1 px-3 py-2 border-t border-slate-700/60 flex flex-col">
+      <div class="space-y-1">
+        <router-link
+          v-for="item in navItems"
+          :key="item.path"
+          :to="item.path"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150"
+          :class="
+            route.path === item.path
+              ? 'bg-primary-500/15 text-primary-400'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+          "
+        >
         <!-- Dashboard icon -->
         <svg
           v-if="item.icon === 'dashboard'"
@@ -94,9 +78,21 @@ const navItems = [
             d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
-        <!-- Search icon -->
+        {{ item.label }}
+        </router-link>
+      </div>
+
+      <!-- 设置：固定在功能列表最下面 -->
+      <router-link
+        to="/settings"
+        class="mt-auto flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150"
+        :class="
+          route.path === '/settings'
+            ? 'bg-primary-500/15 text-primary-400'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+        "
+      >
         <svg
-          v-if="item.icon === 'search'"
           class="w-5 h-5 flex-shrink-0"
           fill="none"
           stroke="currentColor"
@@ -106,10 +102,16 @@ const navItems = [
             stroke-linecap="round"
             stroke-linejoin="round"
             stroke-width="2"
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+          />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
           />
         </svg>
-        {{ item.label }}
+        设置
       </router-link>
     </nav>
 

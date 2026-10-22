@@ -44,5 +44,10 @@ export const useSearchStore = defineStore('search', () => {
     searched.value = false;
   }
 
-  return { query, results, loading, searched, search, clearSearch };
+  /** 删除截图后同步把这条结果移出列表 */
+  function removeResult(filepath: string) {
+    results.value = results.value.filter((r) => r.filepath !== filepath);
+  }
+
+  return { query, results, loading, searched, search, clearSearch, removeResult };
 });
