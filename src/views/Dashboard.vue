@@ -53,11 +53,11 @@ async function handleStop() {
 async function handleManualCapture() {
   isCapturing.value = true;
   try {
-    await captureStore.takeScreenshot(
+    const saved = await captureStore.takeScreenshot(
       settingsStore.format,
       settingsStore.quality
     );
-    showToastMsg('截图已保存');
+    showToastMsg(saved ? '截图已保存' : '画面与上一张相同，已跳过');
   } catch (e: any) {
     showToastMsg('截图失败: ' + (e?.toString() || '未知错误'));
   } finally {

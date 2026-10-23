@@ -22,6 +22,8 @@ const keyword = ref('');
 const lightboxImage = ref<string | null>(null);
 const lightboxPath = ref<string>('');
 const lightboxOcrText = ref<string>('');
+const ocrBusy = ref(false);
+const copyLabel = ref('复制');
 const confirmTarget = ref<string | null>(null);
 
 // 列表用缩略图，灯箱才按需读原图
@@ -160,6 +162,60 @@ function closeLightbox() {
   lightboxImage.value = null;
   lightboxPath.value = '';
   lightboxOcrText.value = '';
+  ocrBusy.value = false;
+  copyLabel.value = '复制';
+}
+
+/** 复制识别结果：优先 Clipboard API，失败时退回 execCommand */
+async function copyOcrText() {
+  const text = lightboxOcrText.value;
+  if (!text) return;
+
+  let ok = false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch {
+    // 落到下面的兜底方案
+  }
+
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch {
+      ok = false;
+    }
+  }
+
+  copyLabel.value = ok ? '已复制' : '复制失败';
+  setTimeout(() => {
+    copyLabel.value = '复制';
+  }, 1500);
+}
+
+/** 手动重跑识别（旧截图没有识别结果时也能补上） */
+async function reocr() {
+  const path = lightboxPath.value;
+  if (!path || ocrBusy.value) return;
+
+  ocrBusy.value = true;
+  try {
+    const text = await invoke<string>('reocr_screenshot', { filepath: path });
+    if (lightboxPath.value === path) lightboxOcrText.value = text;
+  } catch (e) {
+    console.error('重新识别失败:', e);
+  } finally {
+    ocrBusy.value = false;
+  }
 }
 
 /** 删除前先弹确认，避免误点 */
@@ -225,18 +281,42 @@ function truncateText(text: string, maxLen: number = 80): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
 }
 
+/** 当前预览的是这一批里的第几张（-1 表示还没打开） */
+const currentIndex = computed(() =>
+  items.value.findIndex((i) => i.filepath === lightboxPath.value)
+);
+
+function goPrev() {
+  const idx = currentIndex.value;
+  if (idx > 0) openLightbox(items.value[idx - 1].filepath);
+}
+
+function goNext() {
+  const idx = currentIndex.value;
+  if (idx >= 0 && idx < items.value.length - 1) {
+    openLightbox(items.value[idx + 1].filepath);
+  }
+}
+
+/** 在资源管理器里定位这张截图 */
+async function revealFile() {
+  if (!lightboxPath.value) return;
+  try {
+    await invoke('reveal_screenshot', { filepath: lightboxPath.value });
+  } catch (e) {
+    console.error('打开目录失败:', e);
+  }
+}
+
 // Handle keyboard shortcuts in lightbox
 function onKeydown(e: KeyboardEvent) {
   if (!lightboxPath.value) return;
   if (e.key === 'Escape') {
     closeLightbox();
-  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-    const idx = items.value.findIndex((i) => i.filepath === lightboxPath.value);
-    if (e.key === 'ArrowLeft' && idx > 0) {
-      openLightbox(items.value[idx - 1].filepath);
-    } else if (e.key === 'ArrowRight' && idx < items.value.length - 1) {
-      openLightbox(items.value[idx + 1].filepath);
-    }
+  } else if (e.key === 'ArrowLeft') {
+    goPrev();
+  } else if (e.key === 'ArrowRight') {
+    goNext();
   }
 }
 
@@ -600,28 +680,26 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="lightboxPath"
-        class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center"
+        class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center px-4 py-14 lg:px-16"
         @click.self="closeLightbox"
       >
         <!-- Close button -->
         <button
-          class="absolute top-5 right-5 p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+          class="absolute top-4 right-4 z-30 p-2.5 rounded-full bg-black/55 hover:bg-black/80 border border-white/20 text-white backdrop-blur-sm transition-colors"
+          title="关闭 (Esc)"
           @click="closeLightbox"
         >
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
         <!-- Nav buttons -->
         <button
-          class="absolute left-5 top-1/2 -translate-y-1/2 p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-          @click.stop="
-            () => {
-              const idx = items.findIndex((i) => i.filepath === lightboxPath);
-              if (idx > 0) openLightbox(items[idx - 1].filepath);
-            }
-          "
+          class="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white backdrop-blur-sm shadow-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-black/55"
+          :disabled="currentIndex <= 0"
+          title="上一张 (←)"
+          @click.stop="goPrev"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
@@ -629,13 +707,10 @@ onUnmounted(() => {
         </button>
 
         <button
-          class="absolute right-5 top-1/2 -translate-y-1/2 p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-          @click.stop="
-            () => {
-              const idx = items.findIndex((i) => i.filepath === lightboxPath);
-              if (idx < items.length - 1) openLightbox(items[idx + 1].filepath);
-            }
-          "
+          class="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 rounded-full bg-black/55 hover:bg-black/80 border border-white/25 text-white backdrop-blur-sm shadow-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-black/55"
+          :disabled="currentIndex >= items.length - 1"
+          title="下一张 (→)"
+          @click.stop="goNext"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
@@ -643,43 +718,76 @@ onUnmounted(() => {
         </button>
 
         <!-- Content: image + OCR text side by side on large screens -->
-        <div class="flex flex-col lg:flex-row items-center gap-4 max-w-[95vw] max-h-[90vh]">
+        <div class="flex flex-col lg:flex-row items-center gap-4 max-w-full max-h-full min-w-0">
           <!-- Image -->
           <img
             v-if="lightboxImage"
             :src="lightboxImage"
             alt="预览"
-            class="max-w-full lg:max-w-[70vw] max-h-[70vh] object-contain rounded-lg shadow-2xl"
+            class="max-w-full lg:max-w-[62vw] max-h-[72vh] object-contain rounded-lg shadow-2xl"
           />
 
           <!-- OCR text panel -->
           <div
-            v-if="lightboxOcrText"
             class="w-full lg:w-72 max-h-[70vh] overflow-y-auto bg-white/5 backdrop-blur-sm rounded-lg p-4 border border-white/10"
           >
-            <h4 class="text-white/70 text-xs font-semibold uppercase tracking-wider mb-3">
-              识别文字
-            </h4>
-            <p class="text-white/90 text-sm leading-relaxed whitespace-pre-wrap">
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <h4 class="text-white/70 text-xs font-semibold uppercase tracking-wider">
+                识别文字
+              </h4>
+              <div class="flex items-center gap-1.5">
+                <button
+                  class="text-xs px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-40 disabled:hover:bg-white/10"
+                  :disabled="!lightboxOcrText"
+                  @click.stop="copyOcrText"
+                >
+                  {{ copyLabel }}
+                </button>
+                <button
+                  class="text-xs px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-40"
+                  :disabled="ocrBusy"
+                  @click.stop="reocr"
+                >
+                  {{ ocrBusy ? '识别中…' : '重新识别' }}
+                </button>
+              </div>
+            </div>
+
+            <p
+              v-if="lightboxOcrText"
+              class="text-white/90 text-sm leading-relaxed whitespace-pre-wrap"
+            >
               {{ lightboxOcrText }}
+            </p>
+            <p v-else class="text-white/40 text-sm">
+              {{ ocrBusy ? '正在识别…' : '暂无识别文字，可点「重新识别」' }}
             </p>
           </div>
         </div>
 
         <!-- Bottom info bar -->
-        <div class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-4 px-5 py-2.5 bg-white/10 backdrop-blur-sm rounded-lg text-white text-sm">
-          <span>{{ getFilename(lightboxPath) }}</span>
-          <span class="text-white/40">|</span>
+        <div
+          class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 px-5 py-2.5 bg-black/55 backdrop-blur-sm border border-white/15 rounded-lg text-white text-sm max-w-[90vw]"
+        >
+          <span class="truncate max-w-[40vw]">{{ getFilename(lightboxPath) }}</span>
+          <span class="text-white/30">|</span>
           <button
-            class="hover:text-red-400 transition-colors"
+            class="hover:text-primary-300 transition-colors whitespace-nowrap"
+            @click="revealFile"
+          >
+            打开目录
+          </button>
+          <span class="text-white/30">|</span>
+          <button
+            class="hover:text-red-400 transition-colors whitespace-nowrap"
             @click="requestDelete(lightboxPath)"
           >
             删除
           </button>
-          <span class="text-white/40">|</span>
-          <span class="text-white/60"
-            >{{ items.findIndex((i) => i.filepath === lightboxPath) + 1 }} / {{ items.length }}</span
-          >
+          <span class="text-white/30">|</span>
+          <span class="text-white/60 whitespace-nowrap">
+            {{ currentIndex + 1 }} / {{ items.length }}
+          </span>
         </div>
       </div>
     </Teleport>

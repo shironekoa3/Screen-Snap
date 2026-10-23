@@ -24,6 +24,9 @@ const OCR_CONCURRENCY: usize = 1;
 /// 缩略图目录（位于 screenshots/ 下，以点开头，不会被当成日期目录）
 const THUMBS_DIR_NAME: &str = ".thumbs";
 
+/// 「启动时自动开始记录」启动后先等这么久再截第一张，给桌面/显卡驱动留出就绪时间
+const AUTO_START_DELAY_MS: u64 = 3000;
+
 // ── Settings ──────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,6 +37,8 @@ struct Settings {
     quality: u8,
     /// 关闭窗口时是收进托盘（true）还是直接退出（false）
     close_to_tray: bool,
+    /// 程序启动时自动开始定时截图
+    auto_start_capture: bool,
 }
 
 impl Default for Settings {
@@ -43,6 +48,7 @@ impl Default for Settings {
             format: "jpg".to_string(),
             quality: 80,
             close_to_tray: true,
+            auto_start_capture: false,
         }
     }
 }
@@ -78,12 +84,15 @@ struct SearchResult {
 // ── App State ─────────────────────────────────────────────────
 
 struct AppState {
-    capture_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    capture_handle: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     capture_running: Arc<AtomicBool>,
     db: Arc<db::Database>,
     ocr_slots: Arc<Semaphore>,
     /// 关闭窗口的行为，随设置实时更新（窗口事件里读不到 tauri::State，所以单独存一份）
     close_to_tray: Arc<AtomicBool>,
+    /// 上一张「已保存」截图的指纹。新的一帧和它足够像就直接跳过，不写盘也不 OCR。
+    /// 手动截图和定时截图共用，保证两边的判断基准一致。
+    last_fingerprint: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 impl AppState {
@@ -102,6 +111,7 @@ impl AppState {
             db: Arc::new(database),
             ocr_slots: Arc::new(Semaphore::new(OCR_CONCURRENCY)),
             close_to_tray: Arc::new(AtomicBool::new(close_to_tray)),
+            last_fingerprint: Arc::new(Mutex::new(None)),
         })
     }
 }
@@ -129,16 +139,15 @@ fn spawn_save_task(db: Arc<db::Database>, slots: Arc<Semaphore>, shot: PendingSh
 
         let fp = filepath.clone();
         let text = tokio::task::spawn_blocking(move || ocr::recognize_text_blocking(&fp)).await;
+        let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         match text {
-            Ok(Ok(t)) => {
-                let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                let _ = db.insert_or_update_ocr(&filepath, &t, &ts);
+            Ok(Ok(out)) => {
+                let _ = db.insert_or_update_ocr(&filepath, &out.flat, &out.display, &ts);
             }
             Ok(Err(e)) => {
                 eprintln!("OCR 识别失败 [{}]: {}", filepath, e);
                 // Store empty text so we don't retry this file
-                let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                let _ = db.insert_or_update_ocr(&filepath, "", &ts);
+                let _ = db.insert_or_update_ocr(&filepath, "", "", &ts);
             }
             Err(e) => {
                 eprintln!("OCR 任务异常 [{}]: {}", filepath, e);
@@ -272,12 +281,33 @@ fn new_shot_path(format: &str) -> Result<PathBuf, String> {
 
 /// 快速路径：只做「截屏 + 生成缩略图」，几十毫秒即可返回，用来立刻给前端出图。
 /// 原图编码（PNG 最慢，2560×1600 要几百毫秒）交给 `persist_shot` 在后台做。
-fn capture_quick(format: &str, quality: u8) -> Result<(CaptureResult, PendingShot), String> {
-    let filepath = new_shot_path(format)?;
+/// 判定「和上一张一样」的阈值：64×36 灰度图的平均像素差。
+/// 实测同一屏（仅任务栏时钟变化）MAD 在 0~2 之间，切页面时普遍 > 5。
+const DUPLICATE_MAD_THRESHOLD: f64 = 2.0;
+
+fn capture_quick(
+    format: &str,
+    quality: u8,
+    last_fp: &Arc<Mutex<Option<Vec<u8>>>>,
+) -> Result<Option<(CaptureResult, PendingShot)>, String> {
     let (data, width, height) = screenshot::capture_screen()?;
     // 从原始字节直接接管缓冲区，不再复制一份 15 MB
     let image = image::RgbaImage::from_raw(width, height, data)
         .ok_or_else(|| "无法创建图像缓冲区".to_string())?;
+
+    // 先比指纹再决定要不要建文件：和上一张够像就直接返回 None，不产生任何磁盘写入
+    let fp = screenshot::fingerprint(&image);
+    {
+        let mut last = last_fp.lock().map_err(|e| format!("状态锁失败: {}", e))?;
+        if let Some(prev) = last.as_ref() {
+            if screenshot::fingerprint_diff(prev, &fp) < DUPLICATE_MAD_THRESHOLD {
+                return Ok(None);
+            }
+        }
+        *last = Some(fp);
+    }
+
+    let filepath = new_shot_path(format)?;
     let thumbnail = screenshot::encode_thumbnail(&image, THUMB_MAX_WIDTH, THUMB_QUALITY)?;
 
     let result = CaptureResult {
@@ -294,7 +324,7 @@ fn capture_quick(format: &str, quality: u8) -> Result<(CaptureResult, PendingSho
         thumbnail,
     };
 
-    Ok((result, shot))
+    Ok(Some((result, shot)))
 }
 
 /// 后台路径：编码原图、写盘、写缩略图。返回最终文件路径。
@@ -319,15 +349,21 @@ async fn take_screenshot(
     format: String,
     quality: u8,
     state: tauri::State<'_, AppState>,
-) -> Result<CaptureResult, String> {
+) -> Result<Option<CaptureResult>, String> {
     let fmt = format.clone();
+    let fp = state.last_fingerprint.clone();
     // 只等截屏 + 缩略图，几百毫秒的编码落盘不阻塞这里
-    let (result, shot) = tokio::task::spawn_blocking(move || capture_quick(&fmt, quality))
+    let captured = tokio::task::spawn_blocking(move || capture_quick(&fmt, quality, &fp))
         .await
         .map_err(|e| format!("截图任务异常: {}", e))??;
 
+    // None 表示画面和上一张一样，这次不保存
+    let Some((result, shot)) = captured else {
+        return Ok(None);
+    };
+
     spawn_save_task(state.db.clone(), state.ocr_slots.clone(), shot);
-    Ok(result)
+    Ok(Some(result))
 }
 
 /// 读取原图（灯箱预览用）。体积较大，列表不要用它。
@@ -374,13 +410,27 @@ async fn open_screenshot(filepath: String) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-async fn start_capture(
-    state: tauri::State<'_, AppState>,
-    app: tauri::AppHandle,
+/// 可取消的等待：每 200ms 检查一次停止标志，避免 stop 后还要干等一整个间隔。
+async fn wait_cancellable(running: &Arc<AtomicBool>, total_ms: u64) {
+    let mut elapsed = 0u64;
+    while elapsed < total_ms {
+        if !running.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        elapsed += 200;
+    }
+}
+
+/// 启动定时截图循环。手动点击和「启动时自动开始记录」共用这一份实现。
+/// `start_delay_ms`：第一次截图前的等待（自动启动时给系统留出就绪时间）。
+fn start_capture_loop(
+    app: &tauri::AppHandle,
+    state: &AppState,
     interval_secs: u64,
     format: String,
     quality: u8,
+    start_delay_ms: u64,
 ) -> Result<(), String> {
     let running = state.capture_running.clone();
 
@@ -397,19 +447,31 @@ async fn start_capture(
     let app_handle = app.clone();
     let db_clone = state.db.clone();
     let slots = state.ocr_slots.clone();
+    let fp_state = state.last_fingerprint.clone();
 
-    let handle = tokio::spawn(async move {
+    // 用 tauri 的运行时而不是 tokio::spawn：这个函数既会被命令调用，
+    // 也会在 setup 里调用，而 setup 不在 Tokio runtime 上下文中，
+    // 直接 tokio::spawn 会 panic（"there is no reactor running"）。
+    let handle = tauri::async_runtime::spawn(async move {
+        // 自动启动时先等几秒，等桌面/驱动就绪再截第一张
+        if start_delay_ms > 0 {
+            wait_cancellable(&r, start_delay_ms).await;
+        }
+
         while r.load(Ordering::SeqCst) {
             let fmt = format.clone();
+            let fp = fp_state.clone();
             // 只等截屏 + 缩略图；编码落盘和 OCR 都在后台任务里
             let captured =
-                tokio::task::spawn_blocking(move || capture_quick(&fmt, quality)).await;
+                tokio::task::spawn_blocking(move || capture_quick(&fmt, quality, &fp)).await;
 
             match captured {
-                Ok(Ok((result, shot))) => {
+                Ok(Ok(Some((result, shot)))) => {
                     spawn_save_task(db_clone.clone(), slots.clone(), shot);
                     let _ = app_handle.emit("screenshot-taken", result);
                 }
+                // 和上一张几乎一样：静默跳过，不写盘、不 OCR、也不打扰界面
+                Ok(Ok(None)) => {}
                 Ok(Err(e)) => {
                     let _ = app_handle.emit("screenshot-error", e);
                 }
@@ -419,21 +481,42 @@ async fn start_capture(
             }
 
             // Sleep with cancellation check every 200ms
-            let total_sleep_ms = interval_secs * 1000;
-            let mut elapsed = 0u64;
-            while elapsed < total_sleep_ms {
-                if !r.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                elapsed += 200;
-            }
+            wait_cancellable(&r, interval_secs * 1000).await;
         }
     });
 
     *state.capture_handle.lock().unwrap() = Some(handle);
 
     Ok(())
+}
+
+/// 在资源管理器中打开截图所在目录，并选中这个文件。
+#[tauri::command]
+async fn reveal_screenshot(filepath: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    // 校验路径必须在 screenshots/ 之下
+    ensure_in_screenshots(&filepath)?;
+
+    // explorer 的 /select 参数不能带空格，必须拼成 `/select,"路径"`。
+    // 用 raw_arg 避免 std 再套一层引号（否则 explorer 不认）。
+    std::process::Command::new("explorer")
+        .raw_arg(format!("/select,\"{}\"", filepath))
+        .spawn()
+        .map_err(|e| format!("打开目录失败: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn start_capture(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    interval_secs: u64,
+    format: String,
+    quality: u8,
+) -> Result<(), String> {
+    start_capture_loop(&app, state.inner(), interval_secs, format, quality, 0)
 }
 
 #[tauri::command]
@@ -581,6 +664,11 @@ async fn delete_screenshot(
     }
     state.db.delete_ocr_for_file(&filepath).ok();
 
+    // 清掉去重指纹：否则删掉最后一张后，同一屏再也截不回来
+    if let Ok(mut fp) = state.last_fingerprint.lock() {
+        *fp = None;
+    }
+
     Ok(())
 }
 
@@ -609,6 +697,34 @@ async fn get_ocr_text(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     state.db.get_ocr_for_file(&filepath)
+}
+
+/// 手动重新识别一张截图：老图没有识别结果、或想重跑时用。
+#[tauri::command]
+async fn reocr_screenshot(
+    filepath: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    ensure_in_screenshots(&filepath)?;
+
+    // 和自动识别共用同一个信号量，避免手动操作把 CPU 打满
+    let _permit = state
+        .ocr_slots
+        .acquire()
+        .await
+        .map_err(|e| format!("OCR 队列异常: {}", e))?;
+
+    let fp = filepath.clone();
+    let out = tokio::task::spawn_blocking(move || ocr::recognize_text_blocking(&fp))
+        .await
+        .map_err(|e| format!("OCR 任务异常: {}", e))??;
+
+    let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    state
+        .db
+        .update_ocr_text(&filepath, &out.flat, &out.display, &ts)?;
+
+    Ok(out.display)
 }
 
 /// 开机自启的真实状态以注册表为准，不在 settings.json 里重复存一份。
@@ -822,6 +938,22 @@ fn main() {
                 let _ = apply_autostart(true);
             }
 
+            // 「启动时自动开始记录」：开机启动和手动打开都生效
+            let startup = read_settings();
+            if startup.auto_start_capture {
+                let st = app.state::<AppState>();
+                if let Err(e) = start_capture_loop(
+                    app.handle(),
+                    st.inner(),
+                    startup.interval_secs,
+                    startup.format.clone(),
+                    startup.quality,
+                    AUTO_START_DELAY_MS,
+                ) {
+                    eprintln!("自动开始记录失败: {}", e);
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -848,6 +980,7 @@ fn main() {
             read_screenshot_data,
             read_thumbnail_data,
             open_screenshot,
+            reveal_screenshot,
             start_capture,
             stop_capture,
             get_capture_status,
@@ -857,6 +990,7 @@ fn main() {
             delete_screenshot,
             search_screenshots,
             get_ocr_text,
+            reocr_screenshot,
             get_settings,
             save_settings,
             get_autostart,

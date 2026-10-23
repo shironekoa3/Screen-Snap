@@ -101,3 +101,42 @@ pub fn make_thumbnail(
 fn to_rgb_bytes(rgba: &[u8]) -> Vec<u8> {
     rgba.chunks_exact(4).flat_map(|c| [c[0], c[1], c[2]]).collect()
 }
+
+// ── 重复画面判定 ──────────────────────────────────────────────
+
+/// 指纹尺寸：64×36 灰度，共 2304 个采样点。
+/// 缩到这么小之后，任务栏时钟、光标闪烁这类细微变化会被平均掉，
+/// 而页面结构变化会明显体现出来。
+pub const FINGERPRINT_W: u32 = 64;
+pub const FINGERPRINT_H: u32 = 36;
+
+/// 把整屏压成一张小灰度图，用于和上一张比较。
+pub fn fingerprint(img: &RgbaImage) -> Vec<u8> {
+    let small = image::imageops::resize(
+        img,
+        FINGERPRINT_W,
+        FINGERPRINT_H,
+        image::imageops::FilterType::Triangle,
+    );
+
+    small
+        .pixels()
+        .map(|p| {
+            // 人眼对绿色最敏感，用标准亮度权重
+            ((p[0] as u32 * 299 + p[1] as u32 * 587 + p[2] as u32 * 114) / 1000) as u8
+        })
+        .collect()
+}
+
+/// 两张指纹的平均像素差（0 = 完全一样，255 = 完全不同）。
+pub fn fingerprint_diff(a: &[u8], b: &[u8]) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return f64::MAX;
+    }
+    let sum: u64 = a
+        .iter()
+        .zip(b)
+        .map(|(x, y)| (*x as i32 - *y as i32).unsigned_abs() as u64)
+        .sum();
+    sum as f64 / a.len() as f64
+}

@@ -62,6 +62,16 @@ async function handleClose() {
   await appWindow.close();
 }
 
+/**
+ * 屏蔽 WebView2 的默认右键菜单（刷新/检查/另存为等）。
+ * 输入框和文本域保留，否则没法用右键粘贴。
+ */
+function blockContextMenu(e: MouseEvent) {
+  const el = e.target as HTMLElement | null;
+  if (el?.closest('input, textarea, [contenteditable="true"]')) return;
+  e.preventDefault();
+}
+
 onMounted(async () => {
   await settingsStore.load();
   await captureStore.checkStatus();
@@ -69,6 +79,8 @@ onMounted(async () => {
   await captureStore.loadLastScreenshot();
   captureStore.setupListeners();
   await syncMaximized();
+
+  document.addEventListener('contextmenu', blockContextMenu);
 
   unlistenResize = await appWindow.onResized(() => {
     syncMaximized();
@@ -83,6 +95,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   captureStore.cleanup();
+  document.removeEventListener('contextmenu', blockContextMenu);
   if (unlistenResize) unlistenResize();
   if (unlistenClose) unlistenClose();
   if (unlistenFocus) unlistenFocus();

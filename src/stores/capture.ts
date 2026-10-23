@@ -71,15 +71,17 @@ export const useCaptureStore = defineStore('capture', {
       }
     },
 
-    async takeScreenshot(format: string, quality: number) {
-      const result = await invoke<CaptureResult>('take_screenshot', {
+    /** 返回 false 表示画面与上一张几乎一致、这次没有保存 */
+    async takeScreenshot(format: string, quality: number): Promise<boolean> {
+      const result = await invoke<CaptureResult | null>('take_screenshot', {
         format,
         quality,
       });
+      if (!result) return false;
       this.applyCapture(result);
       // 原图还在后台落盘，晚一点再统计，否则数字是旧的
       this.refreshStorageSoon();
-      return result.filepath;
+      return true;
     },
 
     /** 启动时把磁盘上最新的一张截图读出来当预览，避免「最近截图」空白 */

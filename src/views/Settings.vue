@@ -11,6 +11,11 @@ watch(
   () => settingsStore.saveDebounced()
 );
 
+watch(
+  () => settingsStore.autoStartCapture,
+  () => settingsStore.saveDebounced()
+);
+
 onMounted(() => {
   if (!settingsStore.autoStartLoaded) settingsStore.loadAutoStart();
 });
@@ -80,6 +85,23 @@ async function onToggleAutoStart(e: Event) {
       <p v-if="autoStartError" class="text-xs text-red-500 mt-3">
         {{ autoStartError }}
       </p>
+
+      <label
+        class="flex items-start gap-3 cursor-pointer mt-4 pt-4 border-t border-slate-100"
+      >
+        <input
+          type="checkbox"
+          v-model="settingsStore.autoStartCapture"
+          class="mt-0.5 w-4 h-4 rounded accent-primary-500 cursor-pointer"
+        />
+        <span class="flex-1">
+          <span class="block text-sm text-slate-700">启动时自动开始记录</span>
+          <span class="block text-xs text-slate-400 mt-1 leading-relaxed">
+            打开程序后等 3 秒再开始定时截图，不用再点「开始定时截图」。
+            和上面的「开机自动启动」一起打开，就是开机即开始记录。
+          </span>
+        </span>
+      </label>
     </section>
   </div>
 </template>

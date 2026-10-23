@@ -6,6 +6,7 @@ export interface Settings {
   format: string;
   quality: number;
   close_to_tray: boolean;
+  auto_start_capture: boolean;
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -17,6 +18,8 @@ export const useSettingsStore = defineStore('settings', {
     quality: 80,
     /** 关闭窗口时收进托盘（false = 直接退出） */
     closeToTray: true,
+    /** 程序启动时自动开始定时截图 */
+    autoStartCapture: false,
     /** 开机自启，以注册表为准 */
     autoStart: false,
     autoStartLoaded: false,
@@ -34,6 +37,7 @@ export const useSettingsStore = defineStore('settings', {
         this.format = s.format;
         this.quality = s.quality;
         this.closeToTray = s.close_to_tray;
+        this.autoStartCapture = s.auto_start_capture;
         this.loaded = true;
       } catch (e) {
         console.error('加载设置失败:', e);
@@ -50,6 +54,7 @@ export const useSettingsStore = defineStore('settings', {
             format: this.format,
             quality: this.quality,
             close_to_tray: this.closeToTray,
+            auto_start_capture: this.autoStartCapture,
           },
         });
       } catch (e) {
