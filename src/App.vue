@@ -187,9 +187,11 @@ onUnmounted(() => {
       <Sidebar />
       <main class="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
         <router-view v-slot="{ Component }">
-          <keep-alive>
-            <component :is="Component" />
-          </keep-alive>
+          <transition name="page" mode="out-in">
+            <keep-alive>
+              <component :is="Component" />
+            </keep-alive>
+          </transition>
         </router-view>
       </main>
     </div>

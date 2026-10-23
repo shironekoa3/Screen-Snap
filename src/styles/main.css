@@ -69,3 +69,83 @@
            transition-all duration-150 cursor-pointer;
   }
 }
+
+/* ── 动效 ──────────────────────────────────────────────────────
+   统一用短时长（120~200ms）+ 缓出曲线，目的是「感觉得到但不拖沓」。
+   ------------------------------------------------------------ */
+
+@layer base {
+  /* 所有按钮的按下反馈。用 scale 而不是位移，避免和 -translate-y-1/2 之类的定位打架 */
+  button:not(:disabled) {
+    @apply transition-[transform,background-color,color,border-color,box-shadow,opacity]
+           duration-150 ease-out;
+  }
+  button:not(:disabled):active {
+    @apply scale-[0.97];
+  }
+}
+
+/* 页面切换：淡入 + 轻微上移 */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* 遮罩层淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.18s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 弹窗：遮罩淡入 + 面板轻微放大上浮 */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.18s ease;
+}
+.modal-enter-active .modal-panel,
+.modal-leave-active .modal-panel {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s ease;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-from .modal-panel,
+.modal-leave-to .modal-panel {
+  opacity: 0;
+  transform: scale(0.96) translateY(6px);
+}
+
+/* 右下角提示条：从下往上滑出 */
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

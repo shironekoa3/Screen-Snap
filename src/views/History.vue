@@ -678,6 +678,7 @@ onUnmounted(() => {
 
     <!-- Lightbox modal -->
     <Teleport to="body">
+      <transition name="fade">
       <div
         v-if="lightboxPath"
         class="fixed inset-0 z-50 bg-black/85 flex items-center justify-center px-4 py-14 lg:px-16"
@@ -790,31 +791,34 @@ onUnmounted(() => {
           </span>
         </div>
       </div>
+      </transition>
     </Teleport>
 
     <!-- 删除确认 -->
     <Teleport to="body">
-      <div
-        v-if="confirmTarget"
-        class="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4"
-        @click.self="confirmTarget = null"
-      >
-        <div class="card w-full max-w-sm p-5">
-          <h3 class="text-base font-semibold text-slate-800 mb-2">
-            删除这张截图？
-          </h3>
-          <p class="text-sm text-slate-500 mb-1 break-all">
-            {{ getFilename(confirmTarget || '') }}
-          </p>
-          <p class="text-xs text-slate-400 mb-5">
-            文件、缩略图与识别文字会一起删除，无法恢复。
-          </p>
-          <div class="flex justify-end gap-2">
-            <button class="btn-ghost" @click="confirmTarget = null">取消</button>
-            <button class="btn-danger" @click="confirmDelete">删除</button>
+      <transition name="modal">
+        <div
+          v-if="confirmTarget"
+          class="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4"
+          @click.self="confirmTarget = null"
+        >
+          <div class="card modal-panel w-full max-w-sm p-5">
+            <h3 class="text-base font-semibold text-slate-800 mb-2">
+              删除这张截图？
+            </h3>
+            <p class="text-sm text-slate-500 mb-1 break-all">
+              {{ getFilename(confirmTarget || '') }}
+            </p>
+            <p class="text-xs text-slate-400 mb-5">
+              文件、缩略图与识别文字会一起删除，无法恢复。
+            </p>
+            <div class="flex justify-end gap-2">
+              <button class="btn-ghost" @click="confirmTarget = null">取消</button>
+              <button class="btn-danger" @click="confirmDelete">删除</button>
+            </div>
           </div>
         </div>
-      </div>
+      </transition>
     </Teleport>
   </div>
 </template>
